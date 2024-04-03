@@ -14,13 +14,13 @@ export const createTables = `
     DocumentID TEXT PRIMARY KEY NOT NULL,
     Title TEXT NOT NULL,
     UploadDate DATETIME NOT NULL,
-    Content TEXT NOT NULL,
+    Content TEXT NOT NULL
   );
 
   -- UserDocuments Table
   CREATE TABLE IF NOT EXISTS UserDocuments (
     UserDocumentID TEXT PRIMARY KEY NOT NULL,
-    UserID TEXT NOT NULL,
+    Email TEXT NOT NULL,
     DocumentID TEXT NOT NULL,
     CurrentPage INTEGER NOT NULL,
     AccessDate DATETIME NOT NULL,
