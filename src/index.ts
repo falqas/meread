@@ -12,15 +12,20 @@ import dotenv from 'dotenv';
 import EPub from 'epub2';
 import { v4 as uuidv4 } from 'uuid';
 import multer, { FileFilterCallback } from 'multer';
+import * as cron from 'node-cron';
+import sgMail from '@sendgrid/mail';
 
 dotenv.config();
 
 const app: Express = express();
 const port = process.env.PORT || 3000;
-// const epubfile = 'The Rust Programming Language.epub';
 import sqlite3 from 'sqlite3';
 
 import { createTables } from './models';
+
+cron.schedule('30 6 * * *', () => {
+  console.log('Sending new page at 6:30am every day');
+});
 
 const db = new sqlite3.Database('./meread.db', (err) => {
   if (err) {
@@ -35,17 +40,93 @@ const db = new sqlite3.Database('./meread.db', (err) => {
         console.log('Tables created or already exist.');
       }
     });
-
-    db.close((err) => {
-      if (err) {
-        console.error('Error closing database', err.message);
-      } else {
-        console.log('Closed the database connection.');
-      }
-    });
   }
 });
 
+function dispatchEmail(msg: any) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log('apikey', process.env.SENDGRID_API_KEY);
+  console.log('MESSAGE', msg);
+
+  sgMail
+    .send(msg)
+    .then(() => {
+      console.log('Email sent');
+    })
+    .catch((error: any) => {
+      console.error(error);
+    });
+}
+
+function getDailyPages() {
+  // get all users
+  // for each user, get their daily page
+  // email users their current page
+  // increment their current location for tomorrow's email
+
+  const userEmailsWithCurrentLocation = `SELECT Email, DocumentID, CurrentLocation, CharacterLength FROM UserDocuments WHERE IsActive = 1`;
+
+  db.all(
+    userEmailsWithCurrentLocation,
+    [],
+    (err, userCurrentLocationRows) => {
+      if (err) {
+        console.error('Error getting users', err.message);
+        return;
+      }
+
+      userCurrentLocationRows.forEach(
+        (userCurrentLocationRow: any) => {
+          const { CurrentLocation, CharacterLength } =
+            userCurrentLocationRow;
+
+          const contentBufferLength = 50; // Buffer of 50 characters between today's content and yesterday's content, for better continuity/context
+
+          const getTodaysContent = `SELECT SUBSTR(Content, ${
+            CurrentLocation - contentBufferLength
+          }, ${
+            CharacterLength + contentBufferLength
+          }) as TodaysContent FROM Documents WHERE DocumentID = ?`;
+          db.get(
+            getTodaysContent,
+            [userCurrentLocationRow.DocumentID],
+            (err, contentRow) => {
+              if (err) {
+                console.error('Error getting next page', err.message);
+                return;
+              } else {
+                const msg = {
+                  to: (userCurrentLocationRow as any).Email, // Change to your recipient
+                  from: 'mereadreadme@gmail.com',
+                  subject: 'Your daily page, friend.',
+                  html: (contentRow as any).TodaysContent,
+                };
+                // Update current location of row
+                const updateCurrentLocation = `UPDATE UserDocuments SET CurrentLocation = CurrentLocation + ${CharacterLength} WHERE DocumentID = ?`;
+                db.run(
+                  updateCurrentLocation,
+                  [userCurrentLocationRow.DocumentID],
+                  (err) => {
+                    if (err) {
+                      console.error(
+                        'Error updating current location',
+                        err.message
+                      );
+                      return;
+                    }
+                  }
+                );
+                dispatchEmail(msg);
+              }
+            }
+          );
+        }
+      );
+    }
+  );
+}
+
+getDailyPages();
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/'); // Ensure this uploads directory exists
@@ -72,11 +153,8 @@ const upload = multer({
   },
 });
 
-// create sqlite db
-// connect to email
-// console.log('ep1', epub);
-
 app.get('/', (req: Request, res: Response) => {
+  getDailyPages();
   res.send(`
     <h2>Upload an EPUB File</h2>
     <form action="/upload" method="post" enctype="multipart/form-data">
@@ -168,6 +246,30 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
       sqlite3.OPEN_READWRITE
     );
 
+    // get or create user
+    const maybeUser = `SELECT * FROM Users WHERE Email = ?`;
+
+    db.get(maybeUser, [req.body.email], (err, row) => {
+      if (err) {
+        console.error('Error getting user', err.message);
+        return res.status(500).send('Error getting user.');
+      }
+
+      if (!row) {
+        const insertUser = `INSERT INTO Users (Email, SignUpDate) VALUES (?, ?)`;
+        db.run(
+          insertUser,
+          [req.body.email, new Date().toISOString()],
+          (err) => {
+            if (err) {
+              console.error('Error inserting user', err.message);
+              return res.status(500).send('Error inserting user.');
+            }
+          }
+        );
+      }
+    });
+
     const epub = await EPub.createAsync(req.file.path); // Assuming EPub is from 'epub2' and it supports createAsync
 
     // Assuming you want to do something with `epub` here
@@ -189,7 +291,7 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
       })
     );
     const allContentAsString = allContent.join('');
-
+    // TODO uncomment when ready to send email
     // Correct SQL query with placeholders
     const sql = `INSERT INTO Documents (DocumentID, Title, UploadDate, Content) VALUES (?, ?, ?, ?)`;
     const newDocumentID = uuidv4(); // Ensure uuidv4 is imported properly
@@ -212,49 +314,28 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
       }
     );
 
+    // create new record in UserDocuments table
+    const newUserDocumentID = uuidv4();
+    const insertUserDocument = `INSERT INTO UserDocuments (UserDocumentID, Email, DocumentID, CurrentLocation, AccessDate) VALUES (?, ?, ?, ?, ?)`;
+    db.run(
+      insertUserDocument,
+      [newUserDocumentID, req.body.email, newDocumentID, 1, now],
+      (err) => {
+        if (err) {
+          console.error('Error inserting user document', err.message);
+          return res
+            .status(500)
+            .send('Error inserting user document.');
+        }
+      }
+    );
+
     db.close();
   } catch (error) {
     console.error('Error processing file', error);
     res.status(500).send('Error processing file.');
   }
 });
-// app.get('/', (req: Request, res: Response) => {
-//   const sgMail = require('@sendgrid/mail');
-//   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-//   const epub = EPub.createAsync(epubfile).then((epub: any) => {
-//     console.log(epub);
-//     const flow = epub.flow;
-//     const chapter1 = flow[4];
-//     const chapter1Id = chapter1.id;
-// const content =
-//     const chapter1Content = epub.getChapter(
-//       chapter1Id,
-//       (err: any, data: any) => {
-//         console.log('nonraw');
-//         console.log(data);
-//         const msg = {
-//           to: 'falqas@gmail.com', // Change to your recipient
-//           from: 'mereadreadme@gmail.com', // Change to your verified sender
-//           subject: 'Sending with SendGrid is Fun',
-//           text:
-//             'and easy to do aaaa even with Node.js' +
-//             data.slice(0, 100),
-//           html: data,
-//           // html: '<strong>and easy to do anywhere, even with Node.js</strong>',
-//         };
-//         sgMail
-//           .send(msg)
-//           .then(() => {
-//             console.log('Email sent');
-//           })
-//           .catch((error: any) => {
-//             console.error(error);
-//           });
-//       }
-//     );
-//   });
-//   res.send('Express + TypeScript Server');
-// });
 
 app.listen(port, () => {
   console.log(

@@ -2,18 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "ts-node",
       "type": "node",
       "request": "launch",
-      "args": ["${relativeFile}"],
-      "runtimeArgs": ["-r", "ts-node/register"],
-      "cwd": "${workspaceRoot}",
-      "internalConsoleOptions": "openOnSessionStart",
-      "outputCapture": "std",
-      "skipFiles": [
-        "<node_internals>/**",
-        "${workspaceFolder}/node_modules/**/*.js"
-      ]
+      "name": "Run current script",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx"],
+      "program": "${file}",
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }
