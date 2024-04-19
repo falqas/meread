@@ -1,13 +1,13 @@
 {
-  "name": "typescript-project-starter",
+  "name": "me-read",
   "version": "1.0.0",
-  "description": "Barebones typescript project starter with a working launch.json for debugging",
+  "description": "Me Read App",
   "main": "index.ts",
   "scripts": {
-    "start": "node dist/index.js",
+    "start": "npx tsx src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "npx tsc",
-    "dev": "nodemon src/index.ts"
+    "dev": "tsx watch src/index.ts"
   },
   "author": "Faisal Al Qasimi",
   "license": "MIT",
@@ -30,6 +30,7 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "sqlite3": "^5.1.7",
+    "tsx": "^4.7.2",
     "uuid": "^9.0.1"
   },
   "type": "module"

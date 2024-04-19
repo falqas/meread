@@ -1,4 +1,4 @@
-export const createTables = `
+export const createTablesQuery = `
   -- Enable Foreign Key support
   PRAGMA foreign_keys = ON;
 
@@ -22,8 +22,8 @@ export const createTables = `
     UserDocumentID TEXT PRIMARY KEY NOT NULL,
     Email TEXT NOT NULL,
     DocumentID TEXT NOT NULL,
-    CurrentLocation INTEGER NOT NULL,
-    CharacterLength INTEGER NOT NULL DEFAULT 5000,
+    CurrentLocation INTEGER NOT NULL DEFAULT 0,
+    CharacterLength INTEGER NOT NULL DEFAULT 10000,
     AccessDate DATETIME NOT NULL,
     IsActive BOOLEAN NOT NULL DEFAULT 1,
     FOREIGN KEY (Email) REFERENCES Users(Email),

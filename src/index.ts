@@ -1,15 +1,7 @@
-// next steps:
-// send new chapter each day
-// store to sql
-// does sendgrid support email replies? e.g. send more chapters daily
-// store user email in sql
-// NO user auth - just have users table with email and book/chapter number
-// upload doc flow
-// deploy
-// add chapter to subject
 import express, { Express, Request, Response } from 'express';
 import dotenv from 'dotenv';
-import EPub from 'epub2';
+import sqlite3 from 'sqlite3';
+import { EPub } from 'epub2';
 import { v4 as uuidv4 } from 'uuid';
 import multer, { FileFilterCallback } from 'multer';
 import * as cron from 'node-cron';
@@ -19,35 +11,56 @@ dotenv.config();
 
 const app: Express = express();
 const port = process.env.PORT || 3000;
-import sqlite3 from 'sqlite3';
 
-import { createTables } from './models';
+import { createTablesQuery } from './models';
+const ALL_USERS = 'ALL';
 
 cron.schedule('30 6 * * *', () => {
-  console.log('Sending new page at 6:30am every day');
+  // Task runs every day at 6:30 AM
+  sendDailyPages(ALL_USERS);
+  console.log('sendDailyPages task has run');
 });
 
-const db = new sqlite3.Database('./meread.db', (err) => {
-  if (err) {
-    console.error('Error opening database', err.message);
-  } else {
-    console.log('Connected to the SQLite database.');
+let db;
 
-    db.exec(createTables, (err) => {
-      if (err) {
-        console.error('Error creating tables', err.message);
-      } else {
-        console.log('Tables created or already exist.');
+function getDatabaseConnection() {
+  if (!db) {
+    db = new sqlite3.Database(
+      './meread.db',
+      sqlite3.OPEN_READWRITE,
+      (err) => {
+        if (err) {
+          console.error('Cannot open database', err);
+          process.exit(1); // Exit app if DB connection fails
+        } else {
+          console.log('Connected to SQLite database.');
+        }
       }
-    });
+    );
   }
-});
+  return db;
+}
+
+function createTables() {
+  const db = getDatabaseConnection();
+  db.exec(createTablesQuery, (err) => {
+    if (err) {
+      console.error('Error creating tables', err.message);
+    } else {
+      console.log('Tables created or already exist.');
+    }
+  });
+}
+
+function init() {
+  getDatabaseConnection();
+  createTables();
+}
+
+init();
 
 function dispatchEmail(msg: any) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  console.log('apikey', process.env.SENDGRID_API_KEY);
-  console.log('MESSAGE', msg);
-
   sgMail
     .send(msg)
     .then(() => {
@@ -58,75 +71,83 @@ function dispatchEmail(msg: any) {
     });
 }
 
-function getDailyPages() {
-  // get all users
+function sendDailyPages(user: string, DocumentID?: string) {
+  // get userId (or all users if null)
   // for each user, get their daily page
   // email users their current page
   // increment their current location for tomorrow's email
+  let userEmailsWithCurrentLocation;
+  const params = [];
 
-  const userEmailsWithCurrentLocation = `SELECT Email, DocumentID, CurrentLocation, CharacterLength FROM UserDocuments WHERE IsActive = 1`;
+  if (user === ALL_USERS) {
+    userEmailsWithCurrentLocation = `SELECT Email, DocumentID, CurrentLocation, CharacterLength FROM UserDocuments WHERE IsActive = 1`;
+  } else if (user && DocumentID) {
+    userEmailsWithCurrentLocation = `SELECT Email, DocumentID, CurrentLocation, CharacterLength FROM UserDocuments WHERE IsActive = 1 AND Email = ? AND DocumentID = ?`;
+    params.push(user, DocumentID);
+  } else {
+    userEmailsWithCurrentLocation = `SELECT Email, DocumentID, CurrentLocation, CharacterLength FROM UserDocuments WHERE IsActive = 1 AND Email = ?`;
+    params.push(user);
+  }
 
   db.all(
     userEmailsWithCurrentLocation,
-    [],
+    params,
     (err, userCurrentLocationRows) => {
       if (err) {
         console.error('Error getting users', err.message);
         return;
       }
 
-      userCurrentLocationRows.forEach(
-        (userCurrentLocationRow: any) => {
-          const { CurrentLocation, CharacterLength } =
-            userCurrentLocationRow;
+      userCurrentLocationRows.forEach((userCurrentLocationRow) => {
+        const { CurrentLocation, CharacterLength } =
+          userCurrentLocationRow;
 
-          const contentBufferLength = 50; // Buffer of 50 characters between today's content and yesterday's content, for better continuity/context
+        const contentBufferLength = 50; // Buffer of 50 characters between today's content and yesterday's content, for better continuity/context
 
-          const getTodaysContent = `SELECT SUBSTR(Content, ${
-            CurrentLocation - contentBufferLength
-          }, ${
-            CharacterLength + contentBufferLength
-          }) as TodaysContent FROM Documents WHERE DocumentID = ?`;
-          db.get(
-            getTodaysContent,
-            [userCurrentLocationRow.DocumentID],
-            (err, contentRow) => {
-              if (err) {
-                console.error('Error getting next page', err.message);
-                return;
-              } else {
-                const msg = {
-                  to: (userCurrentLocationRow as any).Email, // Change to your recipient
-                  from: 'mereadreadme@gmail.com',
-                  subject: 'Your daily page, friend.',
-                  html: (contentRow as any).TodaysContent,
-                };
-                // Update current location of row
-                const updateCurrentLocation = `UPDATE UserDocuments SET CurrentLocation = CurrentLocation + ${CharacterLength} WHERE DocumentID = ?`;
-                db.run(
-                  updateCurrentLocation,
-                  [userCurrentLocationRow.DocumentID],
-                  (err) => {
-                    if (err) {
-                      console.error(
-                        'Error updating current location',
-                        err.message
-                      );
-                      return;
-                    }
+        const getTodaysContent = `SELECT SUBSTR(Content, ${Math.max(
+          CurrentLocation - contentBufferLength,
+          0
+        )}, ${
+          CharacterLength + contentBufferLength
+        }) as TodaysContent FROM Documents WHERE DocumentID = ?`;
+        db.get(
+          getTodaysContent,
+          [userCurrentLocationRow.DocumentID],
+          (err, contentRow) => {
+            if (err) {
+              console.error('Error getting next page', err.message);
+              return;
+            } else {
+              const msg = {
+                to: userCurrentLocationRow.Email, // Change to your recipient
+                from: 'mereadreadme@gmail.com', // Sender email address
+                subject: 'Your daily page, friend.',
+                html: contentRow.TodaysContent,
+              };
+              // Update current location of row
+              const updateCurrentLocation = `UPDATE UserDocuments SET CurrentLocation = CurrentLocation + ${CharacterLength} WHERE DocumentID = ?`;
+              db.run(
+                updateCurrentLocation,
+                [userCurrentLocationRow.DocumentID],
+                (err) => {
+                  if (err) {
+                    console.error(
+                      'Error updating current location',
+                      err.message
+                    );
+                    return;
                   }
-                );
-                dispatchEmail(msg);
-              }
+                }
+              );
+              dispatchEmail(msg);
             }
-          );
-        }
-      );
+          }
+        );
+      });
     }
   );
 }
 
-getDailyPages();
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/'); // Ensure this uploads directory exists
@@ -139,7 +160,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024 }, // 30 MB
-  storage: multer.diskStorage({}),
+  storage,
   fileFilter: (
     req: Request,
     file: Express.Multer.File,
@@ -154,86 +175,48 @@ const upload = multer({
 });
 
 app.get('/', (req: Request, res: Response) => {
-  getDailyPages();
   res.send(`
-    <h2>Upload an EPUB File</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-      <label for="email">Email:</label><br>
-      <input type="email" id="email" name="email" required><br><br>
-      <input type="file" id="epubFile" name="epubFile" accept=".epub" required><br><br>
-      <button type="submit">Upload File</button>
-    </form>
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>MeRead</title>
+        <style type="text/css">
+            body {
+                margin: 40px auto;
+                max-width: 650px;
+                line-height: 1.6;
+                font-size: 18px;
+                color: #444;
+                padding: 0 10px
+            }
+
+            h1,h2,h3 {
+                line-height: 1.2
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>MeRead 📚</h1>
+            <h3>Yes, you - read! Upload a book, friend</h3>
+          </header>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+          <label for="email">
+          <h3>1. Email</h3>
+          </label>
+          <input type="email" id="email" name="email" required><br><br>
+          <h3>2. ePub file</h3>
+          <input type="file" id="epubFile" name="epubFile" accept=".epub" required><br><br>
+          <h3>3. Upload</h3>
+          <button type="submit">Upload File</button>
+        </form>
+    </body>
+</html>
   `);
 });
-
-// app.post(
-//   '/upload',
-//   upload.single('epubFile'),
-//   (req: Request, res: Response) => {
-//     const email = req.body.email;
-//     const file = req.file;
-
-//     if (!file) {
-//       return res.status(400).send('Please upload an EPUB file.');
-//     }
-
-//     const db = new sqlite3.Database(
-//       './meread.db',
-//       sqlite3.OPEN_READWRITE,
-//       async (err) => {
-//         if (err) {
-//           console.error('Error opening database', err.message);
-//           return res.status(500).send('Database error.');
-//         }
-//         const epubfile = req.file;
-//         if (!epubfile) {
-//           // Handle the case when req.file is undefined
-//           // For example, return an error response
-//           return res.status(400).send('Please upload an EPUB file.');
-//         }
-
-//         const epub = await EPub.createAsync(epubfile.path);
-
-//         // createAsync(epubfile.path).then(
-//         //   (epub: any) => {
-//         //     console.log(epub);
-//         //     const flow = epub.flow;
-//         //     const chapter1 = flow[4];
-//         //     const chapter1Id = chapter1.id;
-
-//         //     const chapter1Content = epub.getChapter(
-//         //       chapter1Id,
-//         //       (err: any, data: any) => {
-//         //         console.log('nonraw');
-//         //         console.log(data);
-//         //       }
-//         //     );
-//         //   }
-//         // );
-//         console.log('epub', epub);
-//         const newDocumentID = uuidv4();
-//         const sql = `INSERT INTO Documents (DocumentID, Title, UploadDate, Content) VALUES (${newDocumentID}, My Title, Date, Foobarbaz)`;
-//         db.run(sql, [email, file.originalname, file.size], (err) => {
-//           if (err) {
-//             console.error(
-//               'Error inserting into database',
-//               err.message
-//             );
-//             return res
-//               .status(500)
-//               .send('Error storing file information.');
-//           }
-
-//           res.send(
-//             'File uploaded and information stored successfully.'
-//           );
-//         });
-
-//         db.close();
-//       }
-//     );
-//   }
-// );
 
 app.post('/upload', upload.single('epubFile'), async (req, res) => {
   if (!req.file) {
@@ -241,15 +224,11 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
   }
 
   try {
-    const db = new sqlite3.Database(
-      './meread.db',
-      sqlite3.OPEN_READWRITE
-    );
+    const db = getDatabaseConnection();
 
     // get or create user
-    const maybeUser = `SELECT * FROM Users WHERE Email = ?`;
-
-    db.get(maybeUser, [req.body.email], (err, row) => {
+    const maybeUserQuery = `SELECT * FROM Users WHERE Email = ?`;
+    db.get(maybeUserQuery, [req.body.email], (err, row) => {
       if (err) {
         console.error('Error getting user', err.message);
         return res.status(500).send('Error getting user.');
@@ -270,11 +249,9 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
       }
     });
 
-    const epub = await EPub.createAsync(req.file.path); // Assuming EPub is from 'epub2' and it supports createAsync
+    const epub = await EPub.createAsync(req.file.path);
 
-    // Assuming you want to do something with `epub` here
-    // For example, extracting text content, title, etc.
-    const title = epub.metadata.title; // Placeholder for actual title extraction logic
+    const title = epub.metadata.title;
 
     const allChapterIds = epub.flow.map((chapter: any) => chapter.id);
     const allContent = await Promise.all(
@@ -291,13 +268,11 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
       })
     );
     const allContentAsString = allContent.join('');
-    // TODO uncomment when ready to send email
-    // Correct SQL query with placeholders
     const sql = `INSERT INTO Documents (DocumentID, Title, UploadDate, Content) VALUES (?, ?, ?, ?)`;
     const newDocumentID = uuidv4(); // Ensure uuidv4 is imported properly
     const now = new Date().toISOString();
 
-    db.run(
+    await db.run(
       sql,
       [newDocumentID, title, now, allContentAsString],
       function (err) {
@@ -309,7 +284,37 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
         }
 
         res.send(
-          'File uploaded and information stored successfully.'
+          `
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>MeRead</title>
+        <style type="text/css">
+            body {
+                margin: 40px auto;
+                max-width: 650px;
+                line-height: 1.6;
+                font-size: 18px;
+                color: #444;
+                padding: 0 10px
+            }
+
+            h1,h2,h3 {
+                line-height: 1.2
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>File uploaded, friend 📚</h1>
+          </header>
+          <h3>Check your email (spam folder, probably) for your first daily page!</h3>
+          <h3>See you again tomorrow at 6:30am ET</h3>
+    </body>
+</html>
+          `
         );
       }
     );
@@ -317,7 +322,7 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
     // create new record in UserDocuments table
     const newUserDocumentID = uuidv4();
     const insertUserDocument = `INSERT INTO UserDocuments (UserDocumentID, Email, DocumentID, CurrentLocation, AccessDate) VALUES (?, ?, ?, ?, ?)`;
-    db.run(
+    await db.run(
       insertUserDocument,
       [newUserDocumentID, req.body.email, newDocumentID, 1, now],
       (err) => {
@@ -325,12 +330,14 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
           console.error('Error inserting user document', err.message);
           return res
             .status(500)
-            .send('Error inserting user document.');
+            .send(
+              'Error inserting user document. Do you already have a book uploaded?'
+            );
         }
       }
     );
 
-    db.close();
+    sendDailyPages(req.body.email, newDocumentID);
   } catch (error) {
     console.error('Error processing file', error);
     res.status(500).send('Error processing file.');
@@ -338,7 +345,5 @@ app.post('/upload', upload.single('epubFile'), async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(
-    `[server]: Server is running at http://localhost:${port}`
-  );
+  console.log(`[server]: Server is running on port ${port}`);
 });
