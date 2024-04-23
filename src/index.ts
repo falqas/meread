@@ -12,7 +12,7 @@ dotenv.config();
 const app: Express = express();
 const port = process.env.PORT || 3000;
 
-import { createTablesQuery } from './models';
+import { createTablesQuery } from './models.js';
 const ALL_USERS = 'ALL';
 
 cron.schedule('30 6 * * *', () => {
@@ -120,7 +120,10 @@ function sendDailyPages(user: string, DocumentID?: string) {
             } else {
               const msg = {
                 to: userCurrentLocationRow.Email, // Change to your recipient
-                from: 'mereadreadme@gmail.com', // Sender email address
+                from: {
+                  name: 'MeRead',
+                  email: 'mereadreadme@gmail.com', // Sender email address
+                },
                 subject: 'Your daily page, friend.',
                 html: contentRow.TodaysContent,
               };
