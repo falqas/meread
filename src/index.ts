@@ -17,8 +17,9 @@ const ALL_USERS = 'ALL';
 
 cron.schedule('30 6 * * *', () => {
   // Task runs every day at 6:30 AM
+  const now = new Date();
   sendDailyPages(ALL_USERS);
-  console.log('sendDailyPages task has run');
+  console.log(`sendDailyPages task has run at ${now}`);
 });
 
 let db;
@@ -27,11 +28,11 @@ function getDatabaseConnection() {
   if (!db) {
     db = new sqlite3.Database(
       './meread.db',
-      sqlite3.OPEN_READWRITE,
+      sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
       (err) => {
         if (err) {
           console.error('Cannot open database', err);
-          process.exit(1); // Exit app if DB connection fails
+          process.exit(1);
         } else {
           console.log('Connected to SQLite database.');
         }
@@ -64,14 +65,16 @@ function dispatchEmail(msg: any) {
   sgMail
     .send(msg)
     .then(() => {
-      console.log('Email sent');
+      const now = new Date();
+      console.log(`Email sent at ${now}`);
     })
     .catch((error: any) => {
       console.error(error);
     });
 }
 
-function sendDailyPages(user: string, DocumentID?: string) {
+export function sendDailyPages(user: string, DocumentID?: string) {
+  // user is either an email address or the string 'ALL'
   // get userId (or all users if null)
   // for each user, get their daily page
   // email users their current page

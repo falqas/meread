@@ -23,11 +23,11 @@ export const createTablesQuery = `
     Email TEXT NOT NULL,
     DocumentID TEXT NOT NULL,
     CurrentLocation INTEGER NOT NULL DEFAULT 0,
-    CharacterLength INTEGER NOT NULL DEFAULT 10000,
+    CharacterLength INTEGER NOT NULL DEFAULT 5000,
     AccessDate DATETIME NOT NULL,
     IsActive BOOLEAN NOT NULL DEFAULT 1,
-    FOREIGN KEY (Email) REFERENCES Users(Email),
-    FOREIGN KEY (DocumentID) REFERENCES Documents(DocumentID)
+    FOREIGN KEY (Email) REFERENCES Users(Email) ON DELETE CASCADE,
+    FOREIGN KEY (DocumentID) REFERENCES Documents(DocumentID) ON DELETE CASCADE
   );
 
   -- EmailQueue Table
