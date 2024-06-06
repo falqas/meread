@@ -191,6 +191,8 @@ app.get('/', (req: Request, res: Response) => {
         <title>MeRead</title>
         <style type="text/css">
             body {
+                display: flex;
+                flex-direction: column;
                 margin: 40px auto;
                 max-width: 650px;
                 line-height: 1.6;
@@ -199,8 +201,25 @@ app.get('/', (req: Request, res: Response) => {
                 padding: 0 10px
             }
 
-            h1,h2,h3 {
-                line-height: 1.2
+            h1, h2, h3 {
+                line-height: 1.2;
+            }
+
+            footer {
+                margin-top: auto;
+                padding: 20px 0;
+                text-align: center;
+                font-size: 14px;
+                color: #888;
+            }
+
+            footer a {
+                color: #0066cc;
+                text-decoration: none;
+            }
+
+            footer a:hover {
+                text-decoration: underline;
             }
         </style>
     </head>
@@ -208,17 +227,21 @@ app.get('/', (req: Request, res: Response) => {
         <header>
             <h1>MeRead 📚</h1>
             <h3>Yes, you - read! Upload a book, friend</h3>
-          </header>
+        </header>
         <form action="/upload" method="post" enctype="multipart/form-data">
-          <label for="email">
-          <h3>1. Email</h3>
-          </label>
-          <input type="email" id="email" name="email" required><br><br>
-          <h3>2. ePub file</h3>
-          <input type="file" id="epubFile" name="epubFile" accept=".epub" required><br><br>
-          <h3>3. Upload</h3>
-          <button type="submit">Upload File</button>
+            <label for="email">
+                <h3>1. Email</h3>
+            </label>
+            <input type="email" id="email" name="email" required><br/><br/>
+            <h3>2. ePub file</h3>
+            <input type="file" id="epubFile" name="epubFile" accept=".epub" required><br/><br/>
+            <h3>3. Upload</h3>
+            <button type="submit">Upload File</button>
         </form>
+        <footer>
+            <p>A procrastination tool by <a href="https://falqas.com">Faisal</a>
+            <p>View the <a href="https://github.com/falqas/meread">source code</a>.</p>
+        </footer>
     </body>
 </html>
   `);

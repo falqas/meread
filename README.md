@@ -5,13 +5,17 @@
 # Future builds
 
 - Unsubscribe...
-- Stop sending pages on book end
-- Trigger next daily page for debugging
-- Better parsing of content to try to avoid unclosed tags
-- Parsing of non-standard epubs
+- Group reads/"book club" (sign up with multiple friends)
+- "Sneak peek" link in email to see next page
+- Increase/decrease size of daily page depending on user behavior
 - Other doc formats (pdf)
-- Mechanism to increase/decrease size of daily page depending on user request
+- Parsing of non-standard epubs
+- Image support
+- Stop sending pages on book end
+- (Opt-in) tracking of streaks
+- Better parsing of content to try to avoid unclosed tags
+- Trigger next daily page for debugging
 - Upgrade to better-sqlite3
 - Auth
 - How to handle in-line links e.g. footnotes
-- (Opt-in) tracking of streaks
+- Highlighting?
